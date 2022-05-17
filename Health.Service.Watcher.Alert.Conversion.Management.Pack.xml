@@ -1,0 +1,239 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ManagementPack ContentReadable="true" SchemaVersion="2.0" OriginalSchemaVersion="1.1" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+	<Manifest>
+		<Identity>
+			<ID>Health.Service.Watcher.Alert.Conversion.Management.Pack</ID>
+			<Version>1.0.0.8</Version>
+		</Identity>
+		<Name>Health Service Watcher Alert Conversion Management Pack</Name>
+		<References>
+			<Reference Alias="SCInternal">
+				<ID>Microsoft.SystemCenter.Internal</ID>
+				<Version>7.0.8443.6</Version>
+				<PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+			</Reference>
+			<Reference Alias="SC">
+				<ID>Microsoft.SystemCenter.Library</ID>
+				<Version>7.0.8443.6</Version>
+				<PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+			</Reference>
+			<Reference Alias="Windows">
+				<ID>Microsoft.Windows.Library</ID>
+				<Version>7.5.8501.0</Version>
+				<PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+			</Reference>
+			<Reference Alias="Health">
+				<ID>System.Health.Library</ID>
+				<Version>7.0.8443.6</Version>
+				<PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+			</Reference>
+			<Reference Alias="System">
+				<ID>System.Library</ID>
+				<Version>7.5.8501.0</Version>
+				<PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+			</Reference>
+			<Reference Alias="Performance">
+				<ID>System.Performance.Library</ID>
+				<Version>7.0.8443.6</Version>
+				<PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+			</Reference>
+		</References>
+	</Manifest>
+	<TypeDefinitions>
+		<ModuleTypes>
+			<DataSourceModuleType ID="Convert.HSW.Alert.DS" Accessibility="Internal" Batching="false">
+				<Configuration>
+					<xsd:element minOccurs="1" name="IntervalSeconds" type="xsd:integer" xmlns:xsd="http://www.w3.org/2001/XMLSchema"></xsd:element>
+					<xsd:element minOccurs="0" name="SyncTime" type="xsd:string" xmlns:xsd="http://www.w3.org/2001/XMLSchema"></xsd:element>
+					<xsd:element minOccurs="1" name="TimeoutSeconds" type="xsd:integer" xmlns:xsd="http://www.w3.org/2001/XMLSchema"></xsd:element>
+				</Configuration>
+				<OverrideableParameters>
+					<OverrideableParameter ID="IntervalSeconds" Selector="$Config/IntervalSeconds$" ParameterType="int" />
+					<OverrideableParameter ID="SyncTime" Selector="$Config/SyncTime$" ParameterType="string" />
+					<OverrideableParameter ID="TimeoutSeconds" Selector="$Config/TimeoutSeconds$" ParameterType="int" />
+				</OverrideableParameters>
+				<ModuleImplementation Isolation="Any">
+					<Composite>
+						<MemberModules>
+							<DataSource ID="Scheduler" TypeID="System!System.SimpleScheduler">
+								<IntervalSeconds>$Config/IntervalSeconds$</IntervalSeconds>
+								<SyncTime>$Config/SyncTime$</SyncTime>
+							</DataSource>
+							<ProbeAction ID="Probe" TypeID="Convert.HSW.Alert.Probe">
+								<TimeoutSeconds>$Config/TimeoutSeconds$</TimeoutSeconds>
+							</ProbeAction>
+						</MemberModules>
+						<Composition>
+							<Node ID="Probe">
+								<Node ID="Scheduler" />
+							</Node>
+						</Composition>
+					</Composite>
+				</ModuleImplementation>
+				<OutputType>System!System.PropertyBagData</OutputType>
+			</DataSourceModuleType>
+			<ProbeActionModuleType ID="Convert.HSW.Alert.Probe" Accessibility="Internal" Batching="false" PassThrough="false">
+				<Configuration>
+					<xsd:element minOccurs="1" name="TimeoutSeconds" type="xsd:integer" xmlns:xsd="http://www.w3.org/2001/XMLSchema"></xsd:element>
+				</Configuration>
+				<OverrideableParameters>
+					<OverrideableParameter ID="TimeoutSeconds" Selector="$Config/TimeoutSeconds$" ParameterType="int" />
+				</OverrideableParameters>
+				<ModuleImplementation Isolation="Any">
+					<Composite>
+						<MemberModules>
+							<ProbeAction ID="Probe" TypeID="Windows!Microsoft.Windows.PowerShellPropertyBagTriggerOnlyProbe">
+								<ScriptName>Convert.HSW.Alert.ps1</ScriptName>
+								<ScriptBody>
+                  param()
+                  
+                  # Constants section - modify stuff here:
+                  #=================================================================================
+                  # Assign script name variable for use in event logging.  
+                  # ScriptName should be the same as the ID of the module that the script is contained in
+                  $ScriptName = "Convert.HSW.Alert.ps1"
+                  $EventID = "4366"
+                  #=================================================================================
+                  
+                  
+                  # Starting Script section - All scripts get this
+                  #=================================================================================
+                  # Gather the start time of the script
+                  $StartTime = Get-Date
+                  #Set variable to be used in logging events
+                  $whoami = whoami
+                  # Load MOMScript API
+                  $api = New-Object -comObject MOM.ScriptAPI
+                  #Log script event that we are starting task
+                  $api.LogScriptEvent($ScriptName,$EventID,0,"`n Script is starting. `n Running as ($whoami).")
+                  #=================================================================================
+                  
+                  # Begin MAIN script section
+                  #=================================================================================
+
+Import-Module OperationsManager
+New-SCOMManagementGroupConnection -ComputerName $env:COMPUTERNAME
+	
+$faillist = Get-SCOMAlert -Criteria "((Name == 'Failed to Connect to Computer' OR Name == 'Health Service Heartbeat Failure') AND ResolutionState == '0')" | Select-Object MonitoringObjectDisplayName,Name
+foreach($object in $faillist)
+{
+      
+    $PropertyBag = $api.CreatePropertyBag()
+    $PropertyBag.AddValue("Source", $object.MonitoringObjectDisplayName)
+    $PropertyBag.AddValue("Trigger", $object.Name)
+    $PropertyBag
+    Clear-Variable -Name PropertyBag
+      
+}                  
+		    #=================================================================================
+                  # End MAIN script section
+                   
+                    
+                  # End of script section
+                  #=================================================================================
+                  #Log an event for script ending and total execution time.
+                  $EndTime = Get-Date
+                  $ScriptTime = ($EndTime - $StartTime).TotalSeconds
+                  $api.LogScriptEvent($ScriptName,$EventID,0,"`n Script Completed. `n Script Runtime: ($ScriptTime) seconds.")
+                  #=================================================================================
+                  # End of script
+                                  </ScriptBody>
+								<Parameters></Parameters>
+								<TimeoutSeconds>$Config/TimeoutSeconds$</TimeoutSeconds>
+								<StrictErrorHandling>false</StrictErrorHandling>
+							</ProbeAction>
+						</MemberModules>
+						<Composition>
+							<Node ID="Probe" />
+						</Composition>
+					</Composite>
+				</ModuleImplementation>
+				<OutputType>System!System.PropertyBagData</OutputType>
+				<TriggerOnly>true</TriggerOnly>
+			</ProbeActionModuleType>
+		</ModuleTypes>
+	</TypeDefinitions>
+	<Monitoring>
+		<Rules>
+			<Rule ID="Convert.HSW.Alert.Alert.Rule" Enabled="true" Target="SC!Microsoft.SystemCenter.AllManagementServersPool" ConfirmDelivery="true" Remotable="true" Priority="Normal" DiscardLevel="100">
+				<Category>Alert</Category>
+				<DataSources>
+					<DataSource ID="DS" TypeID="Convert.HSW.Alert.DS">
+						<IntervalSeconds>300</IntervalSeconds>
+						<SyncTime></SyncTime>
+						<TimeoutSeconds>120</TimeoutSeconds>
+					</DataSource>
+				</DataSources>
+				<WriteActions>
+					<WriteAction ID="WA" TypeID="Health!System.Health.GenerateAlertForType">
+						<Priority>1</Priority>
+						<Severity>2</Severity>
+						<ManagedEntityTypeId>$MPElement[Name="Windows!Microsoft.Windows.Computer"]$</ManagedEntityTypeId>
+						<KeyProperties>
+							<KeyProperty>
+								<PropertyId>$MPElement[Name="Windows!Microsoft.Windows.Computer"]/PrincipalName$</PropertyId>
+								<IsCaseSensitive>false</IsCaseSensitive>
+								<Value>$Data/Property[@Name='Source']$</Value>
+							</KeyProperty>
+						</KeyProperties>
+						<AlertMessageId>$MPElement[Name="Convert.HSW.Alert.Alert.Rule.AlertMessage"]$</AlertMessageId>
+						<AlertParameters>
+							<AlertParameter1>$Data/Property[@Name='Source']$</AlertParameter1>
+							<AlertParameter2>$Data/Property[@Name='Trigger']$</AlertParameter2>
+						</AlertParameters>
+						<Suppression>
+							<SuppressionValue>$Data/Property[@Name='Source']$</SuppressionValue>
+						</Suppression>
+					</WriteAction>
+				</WriteActions>
+			</Rule>
+		</Rules>
+	</Monitoring>
+	<Presentation>
+		<StringResources>
+			<StringResource ID="Convert.HSW.Alert.Alert.Rule.AlertMessage" />
+		</StringResources>
+	</Presentation>
+	<LanguagePacks>
+		<LanguagePack ID="ENU" IsDefault="true">
+			<DisplayStrings>
+				<DisplayString ElementID="Convert.HSW.Alert.Alert.Rule">
+					<Name>Convert Health Service Watcher Alerts Alert Rule</Name>
+				</DisplayString>
+				<DisplayString ElementID="Convert.HSW.Alert.Alert.Rule.AlertMessage">
+					<Name>Operations Manager Cannot Connect To Computer</Name>
+					<Description>{1}
+System: {0}
+</Description>
+				</DisplayString>
+				<DisplayString ElementID="Health.Service.Watcher.Alert.Conversion.Management.Pack">
+					<Name>Health Service Watcher Alert Conversion Management Pack</Name>
+				</DisplayString>
+			</DisplayStrings>
+			<KnowledgeArticles>
+				<KnowledgeArticle ElementID="Convert.HSW.Alert.Alert.Rule" Visible="true">
+					<MamlContent>
+						<maml:section xmlns:maml="http://schemas.microsoft.com/maml/2004/10">
+							<maml:title>Summary</maml:title>
+							<maml:para>This alert is raised when Operations Manager cannot connect to a monitored computer. This could mean that the system has gone offline.</maml:para>
+						</maml:section>
+						<maml:section xmlns:maml="http://schemas.microsoft.com/maml/2004/10">
+							<maml:title>Causes</maml:title>
+							<maml:para>Possible causes for this alert are:</maml:para>
+							<maml:para>The Microsoft Monitoring Agent Service has been stopped</maml:para>
+							<maml:para>Network disruption is preventing Operations Manager from communicating with the system</maml:para>
+							<maml:para>The system is unexpectedly offline</maml:para>
+						</maml:section>
+						<maml:section xmlns:maml="http://schemas.microsoft.com/maml/2004/10">
+							<maml:title>Resolutions</maml:title>
+							<maml:para>Check in SquaredUp to see if the system is still offline.</maml:para>
+							<maml:para>If the systems is still offline, attempt to remote in to the system.</maml:para>
+							<maml:para>If this succeeds, check the status of the Microsoft Monitoring Agent service. If it is stopped, attempt to start it. If it is running, attempt to restart it.</maml:para>
+							<maml:para>If the above does not restore connectivity, contact the Operations Manager support team (assuming of course the system itself is not offline).</maml:para>
+						</maml:section>
+					</MamlContent>
+				</KnowledgeArticle>
+			</KnowledgeArticles>
+		</LanguagePack>
+	</LanguagePacks>
+</ManagementPack>
